@@ -1,0 +1,485 @@
+---
+title: "Kicjstarter data EDA"
+output:
+  html_document:
+    df_print: paged
+---
+
+Поля, які використані в датасеті: <\br>
+-ID: internal kickstarter id
+-name: name of project - A project is a finite work with a clear goal that you’d like to bring to life. Think albums, books, or films.
+-category: category
+-main_category: category of campaign
+-currency: currency used to support
+-deadline: deadline for crowdfunding
+-goal: fundraising goal - The funding goal is the amount of money that a creator needs to complete their project.
+-launched: date launched
+-pledged: amount pledged by "crowd"
+-state: Current condition the project is in
+-backers: number of backers
+-country: country pledged from
+-usd pledged: Pledged amount in USD (conversion made by KS)
+-usd_pledged_real: Pledged amount in USD (conversion made by fixer.io api)
+-usd_goal_real: Goal amount in USD (conversion made by fixer.io api)
+
+```{r}
+data <- read.csv("ks-projects-201801.csv", header = TRUE)
+summary(data)
+```
+
+```{r}
+head(data)
+```
+
+```{r}
+str(data)
+```
+Отже, як бачимо в нас є 8 строкових колонок і 6 числових колонок(не враховуючи ID). 
+Можемо побачити також, що в нас є 159 підкатегорій, 15 основних категорій, також 14 валют (але так як в нас є уже переведені в долари усі суми, ми можемо упустити цю колонку), 23 країни світу і 6 станів самого стартапу.
+
+```{r}
+print("NA values in columns")
+sapply(data, function(x) sum(is.na(x)))
+```
+Як бачимо пропущені значення є тільки в колонці usd.pledged, ці значення є переведеними з інших валют за допомогою KS(припускаю, що це сервіс). Але в нас є значення переведені сервісом fixer.io api, тому можна спиратись на ці дані. 
+Хоча також варто перевірити наскільки відрізняються ці 2 колонки.
+
+```{r}
+data.with.na <- data[is.na(data['usd.pledged']),]
+head(data.with.na)
+```
+
+Досить велика різниця, тому варто обрати дані, з якими потрібно працювати.
+
+```{r}
+main_categories <- unique(data['main_category'])
+print(main_categories)
+```
+
+```{r}
+library(dplyr)
+data$ID <- NULL
+data$currency <- NULL
+data$category <- NULL
+data$usd.pledged <- NULL
+count(group_by(.data = data, main_category))
+```
+По розподілу стартапів по категоріях бачимо, що більшість категорій представлена кількістю від 10 до 50 тисяч. Найменша кількість проектів спостерігається в напрямку журналістики і танців.
+Далі можна розглянути розподіл по станах.
+
+```{r}
+library(ggplot2)
+require(scales)
+count(group_by(.data = data, state))
+ggplot(data%>%group_by(main_category, state)%>%count(), aes(x=factor(state), y=n)) +  geom_col(position = 'dodge') + labs(x = "Project state", y= "Count")
+```
+Як бачимо найбільша кількість зафейлених і успішних зборів. Також є невелика кількість проектів, які є в стані зборів, призупиненому стані або невизначеному стані.
+Також можна глянути на розподіл проектів по країнах.
+
+```{r}
+country.counts <- count(group_by(.data = data, country))
+country.counts[order(country.counts$n, decreasing = T),]
+ggplot(data%>%group_by(country, state)%>%count(), aes(x=factor(country), y=n)) +  geom_col(position = 'dodge') + labs(x = "Project state", y= "Count")
+```
+Як бачимо найбільше проекті з США, далі Велика Британія і Канада.
+Тепер давайте подивимось розподіл числових даних.
+Так як перекладена ціль у доларах була зроблена за допомогою сервісу fixer.io, то дані по зборах також використуватимуться ті, які отримані з того ж сервісу (тобто колонки usd_pledged_real, usd_goal_real).
+
+```{r}
+ggplot(data) + geom_boxplot(aes(y=backers))+scale_y_continuous(labels = comma)
+ggplot(data) + geom_boxplot(aes(y=usd_pledged_real))+scale_y_continuous(labels = comma)
+ggplot(data) + geom_boxplot(aes(y=usd_goal_real))+scale_y_continuous(labels = comma)
+```
+
+Як бачимо у всіх числових значеннях медіана є близькою до нуля. Тому можна спробувати прибрати викиди (взяти значення, які менші за 1.5*IQR), які спричиняють ненаглядність даних боксплотів. Так як з початкової таблиці summary ми побачили, що значення медіани є досить низькі, то думаю, що це гарний варіант краще подивитись на розподіл даних.
+
+```{r}
+ggplot(data[data$backers < (quantile(data$backers, probs = c(0.75)) + 1.5*IQR(data$backers)),]) + geom_boxplot(aes(y=backers))+scale_y_continuous(labels = comma)
+ggplot(data[data$usd_pledged_real < (quantile(data$usd_pledged_real, probs = c(0.75)) + 1.5*IQR(data$usd_pledged_real)),]) + geom_boxplot(aes(y=usd_pledged_real))+scale_y_continuous(labels = comma)
+ggplot(data[data$usd_goal_real < (quantile(data$usd_goal_real, probs = c(0.75)) + 1.5*IQR(data$usd_goal_real)),]) + geom_boxplot(aes(y=usd_goal_real))+scale_y_continuous(labels = comma)
+
+```
+Як бачимо, що кількість людей, які підтримали проекти в середньому досить низька кількість, так як медіана дорівнює 12.
+Також можна глянути чому спостерігаються такі великі викиди і можливо це була механічна помилка під час конвертації даних.
+Тому наступне - це оглянути викиди.
+
+```{r}
+data[data$backers > 50000,c('goal', 'backers', 'usd_pledged_real', 'usd_goal_real')]
+```
+Щодо кількості прихильників, бачимо, що викиди є обгрунтовані, так як дані проекти зібрали дуже великі збори від великої кількості людей.
+
+```{r}
+data[data$usd_pledged_real > 5000000, c('name','goal', 'backers', 'usd_pledged_real', 'usd_goal_real')]
+```
+
+Як бачимо найбільш успішним по зборах є проект розумного годинника Pebble Time. Бачимо, що дані адекватні також і викиди не є технічними помилками.
+Далі можна спробувати переглянути успішність проектів по категоріях.
+
+```{r}
+# data$duration <- 
+data$duration <- as.Date(data$deadline) - as.Date(data$launched)
+```
+
+
+```{r}
+ggplot(data) + geom_boxplot(aes(y=duration))+scale_y_continuous(labels = comma)
+```
+
+```{r}
+head(data[data$duration>5000,])
+```
+Як бачимо велику тривалість мають проекти, які мали помилки в початковій даті, а саме невказані значення, які були визначені як початкова дата епохи, а саме 1970-01-01.
+Тому можна спробувати відфільтрувати такі значення і подивитись на розподіл тривалостей проектів на кікстартері.
+
+```{r}
+ggplot(data[data$duration<5000,]) + geom_boxplot(aes(y=duration))+scale_y_continuous(labels = comma)
+```
+Як бачимо середня тривалість проектів на кікстартері є приблищно місяць.
+
+Давайте переглянемо розподіл успішності проектів по категоріях і країнах.
+Загальний розподіл станів проектів виглядає наступним чином: 
+```{r}
+ggplot(data%>%group_by(main_category, state)%>%count(), aes(x=factor(state), y=n)) +  geom_col(position = 'dodge') + labs(x = "Project state", y= "Count")
+```
+
+
+Спершу переглянемо по категоріях.
+Так як категорій є велика кількість, то найкраще взяти топ 5 категорій по кількості проектів і оцінити або по кожній категорії окремий фасет. 
+```{r}
+categories <- unique(data$main_category)
+
+for(cat in categories) {
+  category.data <- data[data$main_category==cat,]
+  category.count <- count(category.data)
+  success.rate <- count(category.data[category.data$state=='successful', ])/category.count*100
+  failed.rate <- count(category.data[category.data$state=='failed', ])/category.count*100
+  print(
+    ggplot(category.data%>%group_by(main_category, state)%>%count(), aes(x=factor(state), y=n)) +  geom_col(position = 'dodge') + labs(title=cat, x = "Project state", y= "Count", subtitle = paste0("Success rate  ",as.integer(success.rate), "% ;    ", "Fail rate ", as.integer(failed.rate), "%"))
+  )
+}
+```
+Як бачимо найвищий рівень успіху спостерігається в категорії Танці, а найбільший відсоток фейлів в категоріях Журналістика, Їжа, Рукоділля і Технології.
+
+Наступне - це визначити відсоток станів проекту в відповідності до країни.
+Надалі визначаються success rate і fail rate, які є простими відношення успішних проектів до загальної кількості і також зайфейлених до усіх. В даних метриках немає кореції до кількості, тому вони по суті показують сухе співвідношення.
+```{r}
+countries <- unique(data$country)
+
+for(country in countries) {
+  country.data <- data[data$country==country,]
+  country.count <- count(country.data)
+  success.rate <- count(country.data[country.data$state=='successful', ])/country.count*100
+  failed.rate <- count(country.data[country.data$state=='failed', ])/country.count*100
+  print(
+    ggplot(country.data%>%group_by(country, state)%>%count(), aes(x=factor(state), y=n)) +  geom_col(position = 'dodge') + labs(title=country, x = "Project state", y= "Count", subtitle = paste0("Success rate  ",as.integer(success.rate), "% ;    ", "Fail rate ", as.integer(failed.rate), "%"))
+  )
+}
+```
+Як бачимо, що в більшості країн є досить високий відсоток проектів, які були зафейлені, тобто не було зібрано відповідної суми. Найбільший відсоток фейлів спостерігається в Італії, Австрії, Голандії і Люксембургу. Найвищий ж відсоток успішності спостерігається в США (37%).
+Також з даних візуалізацій, можемо побачити, що певна частина проектів має невідому країну, а саме (N,0") в якій найбільша кількість невизначених проектів і тільки 2% проектів були успішними.
+
+Далі можна спробувати також середню кількість донатів на проекті, а саме загальний збір поділити на кількість прихильників проекту.
+
+```{r}
+data$avg.per.backer <- data$usd_pledged_real/data$backers
+data$avg.per.backer[!is.finite(data$avg.per.backer)] <- 0.0
+ggplot(data) + geom_boxplot(aes(y=avg.per.backer))+scale_y_continuous(labels = comma)
+```
+
+```{r}
+data[data$avg.per.backer> 5000,c("usd_goal_real", "country","usd_pledged_real", "backers", "avg.per.backer")]
+```
+Як бачимо дуже великі збори на людину є в багатьох проектах і не видно жодних патернів, окрім як країна (США), але зважаючи на те, що більшість проектів з США можна не зважати на цю залежність.
+
+```{r}
+ggplot(data[data$avg.per.backer < 1000,]) + geom_boxplot(aes(y=avg.per.backer))+scale_y_continuous(labels = comma)
+```
+Як бачимо середні збори з людини є досить низькими, але надалі можна спробувати дослідити залежності і в яких саме проектах є вищі збори на людину.
+
+Наступне, що можна дослідити - це залежності. 
+Спершу відповісти на питання яка залежність між тривалістю і кількістю зборів:
+
+```{r}
+ggplot(data[data$duration < 200, ]) + geom_smooth(aes(x=duration, y=usd_pledged_real))
+```
+Як бачимо, що короткі проекти(до 20 днів) в більшоісті збирають невеликі суми до 5000$ але вже проекти середньої тривалості збирають більше 15 тисяч при тривалості близько 45 днів. Також як можна побачити, що є тенеденція щодо того, що довгострокові проекти мають менші збори, ніж середньострокові.
+
+```{r}
+ggplot(data[data$duration < 200, ]) + geom_smooth(aes(x=duration, y=usd_goal_real), method="lm")+scale_y_continuous(labels = comma)
+```
+На даному графіку бачимо по суті очевидну річ, що проекти, які хочуть зібрати більше(тобто більша ціль) мають довшу тривалість.
+
+Тепер можна оцінити тривалість проектів по станах, країнах і категоріях:
+```{r}
+categories <- unique(data$main_category)
+
+for(cat in categories) {
+  category.data <- data[(data$main_category==cat) & (data$duration<200),]
+  print(
+    ggplot(category.data) +  geom_boxplot(aes(y=duration)) + labs(title=cat)
+  )
+}
+```
+Як бачимо по категоріях середня тривалість проектів є приблизно однаковою і медіана є ~27 днів.
+
+```{r}
+countries <- unique(data$country)
+
+for(cat in countries) {
+  category.data <- data[(data$country==cat) & (data$duration<200),]
+  print(
+    ggplot(category.data) +  geom_boxplot(aes(y=duration)) + labs(title=cat)
+  )
+}
+```
+Середня тривалість проектів по країнах також не відрізняється і може коливатись в межах 2-3 днів.
+
+Спробуємо оцінити тривалість проектів в залежності від станів проектів.
+```{r}
+ggplot(data[data$duration < 200,]) + geom_boxplot(aes(y=duration, x=state))
+```
+Як бачимо тривалість не дуже відррязняється по станах, так як середнє значення приблизно 27 днів, тільки наприклад suspended проекти в більшості мали меншу тривалість.
+
+Також можна спробувати глянути на те, чи залежить фінальний стан проекту від розміру цілі.
+```{r}
+ggplot(data) + geom_boxplot(aes(y=usd_goal_real, x=state))+scale_y_continuous(labels = comma)
+```
+З даного графіку видно, що найбільша сума цілей по проектах припадає на скасовані і зафейлені проекти.
+Також можна спробувати глянути детальніше без аутлаєрів, щоб детальніше побачити розподіли.
+
+```{r}
+ggplot(data[data$usd_goal_real < 100000,]) + geom_boxplot(aes(y=usd_goal_real, x=state))+scale_y_continuous(labels = comma)
+```
+Як бачимо, що медіани показують те, о в проектів, які в станах інших від Successful або undefined спостерігаються вищі цілі, тобто ми бачимо, що чим вища ціль, тим більший шанс, що проект не збере потрібної кількості.
+
+Також можна оцінити залежність величини зборів в межах кожного стану.
+```{r}
+ggplot(data) + geom_boxplot(aes(y=usd_pledged_real, x=state))+scale_y_continuous(labels = comma)
+```
+Логічно, що найбільші збори спостерігаються в успішних проектів, але можна спробувати подивитись ближче, прибравши дуже високі збори.
+
+```{r}
+ggplot(data[data$usd_pledged_real < 250000,]) + geom_boxplot(aes(y=usd_pledged_real, x=state))+scale_y_continuous(labels = comma)
+```
+
+```{r}
+print("GOAL SUMMARY")
+tapply(data$usd_goal_real, data$state, summary)
+```
+Як бачимо, що в нас найвища медіана по цілі в скасованих проектів і в успішних. Але якщо ми подивимось на максимальні і мінімальні цілі, а також по квартилях в даних, то можемо побачити, що призупинені і успішні проекти мають в середньому менші цілі по зборах, аніж невдалі. Також якщо подивитись на максимальні цілі, то можемо побачити, що в скасованих,призупинених і неуспішних проектів найвищі максимуми, що свідчить, що якщо ціль дуже висока, то дуже висока ймовірність не виконати ціль і успішно закрити проект.
+
+```{r}
+print("PLEDGED SUMMARY")
+tapply(data$usd_pledged_real, data$state, summary)
+```
+По зборах, ми можемо побачити очевидні речі, що найбільші збори в успішних проектів. Але можна спробувати оцінити також середній відсоток від зборів по проектах різних станів.
+
+```{r}
+data$pledged.percent.from.goal <- round(data$usd_pledged_real / data$usd_goal_real,2)
+ggplot(data[data$state != 'successful',]) + geom_boxplot(aes(y=pledged.percent.from.goal, x=state))+scale_y_continuous(labels = comma)
+tapply(data$pledged.percent.from.goal, data$state, summary)
+```
+Спершу спробуємо подивитиь ближче до 100% зборів, щоб зрозуміти статистику зборів.
+```{r}
+ggplot(data[data$state != 'successful' & data$pledged.percent.from.goal < 1,]) + geom_boxplot(aes(y=pledged.percent.from.goal, x=state))+scale_y_continuous(labels = comma)
+```
+
+З даного графіка можемо побачити, що існує досить велика кількість проектів, які були скасовані навіть після дуже великих зборів. Тому можна спробувати глянути що це за проекти.
+
+```{r}
+canceled.projects.after.pledging <- data[data$state=='canceled' & data$pledged.percent.from.goal > 1,]
+canceled.projects.after.pledging[,c("name","main_category","usd_goal_real","usd_pledged_real")]
+```
+
+```{r}
+ggplot(canceled.projects.after.pledging%>%group_by(main_category)%>%count(), aes(x=factor(main_category), y=n)) +  geom_col(position = 'dodge') + labs(x = "Category", y= "Count")
+```
+Як бачимо, найбільше скасованих проектів, які назбирали більше, аніж була їх ціль є з категорій Дизайн, Ігри та Технології.
+
+Також можна спробувати глянути на те яка залежність між середнім вкладом і успішністю проектів або тривалістю і середнім вкладом.
+```{r}
+ggplot(data[data$duration < 200, ]) + geom_smooth(aes(x=duration, y=avg.per.backer))
+```
+Тут спостерігається така ж тенденція як і щодо величини зборів, тобто проекти з середньою довжиною мають найбільшу кількість прихильників.
+
+```{r}
+ggplot(data[data$usd_goal_real < 100000,]) + geom_smooth(aes(x=usd_goal_real, y=avg.per.backer))
+```
+І також бачимо, що при більшій цілі зборів спостерігається більша кількість прихильників, що також є очевидним.
+
+
+```{r}
+correlations <- cor(data[,c("usd_goal_real","usd_pledged_real", "avg.per.backer", "backers", "pledged.percent.from.goal")])
+correlations
+```
+Як бачимо лінійні кореляції є тільки між значеннями, які є тісно пов'язаними(кількість прихильників і загальні збори або кількість зборів і збори на людину).
+```{r}
+ggplot(data[data$usd_pledged_real < 500000,]) + geom_smooth(aes(x=usd_pledged_real, y=avg.per.backer)) +scale_x_continuous(labels = comma) 
+```
+
+Також наступне, що можна проаналізувати - це кількість проектів по роках, візуалізація успішних проектів по роках.
+
+```{r}
+data$year <- as.integer(format(as.Date(data$launched),"%Y"))
+
+all.by.year <- data[data$year>1970,]%>%group_by(year)%>%count()
+successful.by.year <- data[data$year>1970 & data$state=='successful',] %>% group_by(year) %>% count()
+
+percentage.by.year <- head(all.by.year, -1)
+percentage.by.year$n <- successful.by.year$n / percentage.by.year$n
+
+ggplot(all.by.year) + geom_bar(aes(x=year, y=n), stat="identity")+ scale_x_continuous(breaks=seq(2009,2017,1))
+ggplot(successful.by.year) + geom_bar(aes(x=year, y=n), stat="identity") + scale_x_continuous(breaks=seq(2009,2017,1))
+ggplot(percentage.by.year) + geom_bar(aes(x=year, y=n), stat="identity") + scale_x_continuous(breaks=seq(2009,2017,1))
+
+
+```
+Отже ми бачимо, що наш датасет містить проекти з 2009 і до 2018 року, але так як успішні тільки до 2017, то ми можемо побачити загальну кількість проектів по роках, також кількість успішних проектів і відсоток успішних проектів по роках. Отож, бачимо, що найбільш успішним був 2011 рік, так як відсоток успішності проектів є найвищим.
+
+
+Як результат попереднього аналізу даних, я розглядаю варіанти візуалізувати наступні речі:
+
+1) проекти, які зібрали більше, ніж очікували і в результаті були скасовані.
+```{r}
+ggplot(data[data$state=='canceled' & data$pledged.percent.from.goal > 100,]) + geom_bar(aes(x=year, y=sum(usd_pledged_real)),stat='identity') + geom_point(aes(x=year, y=usd_pledged_real), col="red") +scale_y_continuous(labels = comma)
+```
+
+2) Барплот по роках з розподілом барів по стану проектів
+```{r}
+ggplot(data[data$year > 1970, ], aes(x=year, fill=state)) + geom_histogram() + scale_x_continuous(breaks = seq(2009, 2018, 1))
+```
+3) Розподіл суми зборів по роках стеком по станах проектів (поки що до кінця не зрозумів, як візуалізувати розподіл даних з великою кількістю аутлаєрів)
+```{r fig.width=10}
+ggplot(data[data$year > 1970,], aes(x=factor(year), y=sum(usd_pledged_real), fill=state)) + geom_bar(stat = "identity")+scale_y_continuous(labels = comma)
+```
+Тобто ми можемо побачити, що найбільшу кількість зборів все одно приносять проекти, які в кінцевому результаті не отримують потрібної кількості коштів. І так як кількість failed проектів є більшою, то можемо побачити, що збори від таких проектів також є досить великі.
+
+Також розглядаю варіант показати на графіку розподіл зборів по категоріях у проектах, які зібрали більше, ніж очікували (successful) але в кінцевому результаті були скасовані:
+
+```{r}
+ggplot(canceled.projects.after.pledging%>%group_by(main_category)%>%count(), aes(x=factor(main_category), y=n)) +  geom_col(position = 'dodge') + labs(x = "Category", y= "Count")
+
+ggplot(canceled.projects.after.pledging) +  geom_bar(aes(x=main_category, y=sum(usd_pledged_real)), stat='identity') + labs(x = "Category", y= "Count")+scale_y_continuous(labels = comma)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Final visualizations
+
+1)  розподіл за категоріями в часі (наприклад, за роками) - чи можна сказати, що якісь категорії стабільно домінують? Тут може бути використано stacked bar/area chart, stream graph.
+
+```{r}
+library(RColorBrewer)
+getPalette = colorRampPalette(brewer.pal(9, "Set1"))
+colorCount <- unique(data$main_category)
+ggplot(data[data$year > 1970 & data$year < 2018,] %>% group_by(year, main_category) %>%  summarise(usd_pledged_real = sum(usd_pledged_real)), aes(x=year, y=usd_pledged_real, fill=main_category)) + geom_area(size=.2, alpha=.4,colour="black", position = 'stack') + scale_y_continuous(labels = comma) + scale_x_continuous(breaks = seq(2009,2017, 1)) + scale_fill_manual(values=c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000'))
+```
+
+або
+
+```{r fig.width = 12, fig.height= 10}
+library(streamgraph)
+library(reshape2)
+
+data.for.streamgraph <- data[data$year > 1970 & data$year < 2018,] %>% group_by(year, main_category) %>%  summarise(usd_pledged_real = sum(usd_pledged_real))
+max(data.for.streamgraph$usd_pledged_real)
+
+streamgraph( data.for.streamgraph, "main_category", "usd_pledged_real", "year", interactive=TRUE, interpolate = "step", offset="zero") %>%
+  sg_fill_tableau() %>%
+  sg_fill_brewer() %>%
+  sg_axis_y(10, tick_format = '$') %>%
+  sg_axis_x(tick_units = "year", tick_interval = 1, tick_format = "%Y") %>%
+  sg_legend(TRUE, "Category: ")
+```
+
+2) за категоріями і статусом - в якій категорії найбільше успішних проектів
+
+```{r}
+ggplot(data[data$year>1970 & data$state=='successful',] %>% group_by(year, main_category)) + geom_bar(aes(x=year, fill=main_category), stat='count') + scale_fill_manual(values=c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000'))
+```
+
+2б) за категоріями і статусом - в якій категорії найбільше failed проектів
+```{r}
+ggplot(data[data$year>1970 & data$state=='failed',] %>% group_by(year, main_category)) + geom_bar(aes(x=year, fill=main_category), stat='count') + scale_fill_manual(values=c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000'))
+```
+
+
+
+
+3) Як змінюється частка (відсоток) успішних проектів
+```{r}
+all.by.category <- data[data$year > 1970, ] %>% group_by(year, main_category) %>% count()
+successful.by.category <- data[data$year > 1970 & data$state=='successful',] %>% group_by(year, main_category) %>% count()
+all.by.category$n <- successful.by.category$n / all.by.category$n * 100
+
+
+ggplot(all.by.category[all.by.category$year<2018,], aes(x=year, y=n, fill=main_category)) + geom_area(size=.2, alpha=.4,colour="black", position = 'stack') + scale_y_continuous(labels = comma) + scale_x_continuous(breaks = seq(2009,2017, 1)) + scale_fill_manual(values=c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000'))
+```
+3б) Як змінюється частка (відсоток) успішних проектів
+```{r}
+all.by.category <- data[data$year > 1970, ] %>% group_by(year, main_category) %>% count()
+failed.by.category <- data[data$year > 1970 & data$state=='failed',] %>% group_by(year, main_category) %>% count()
+all.by.category$n <- failed.by.category$n / all.by.category$n * 100
+
+
+ggplot(all.by.category[all.by.category$year<2018,], aes(x=year, y=n, fill=main_category)) + geom_area(size=.2, alpha=.4,colour="black", position = 'stack') + scale_y_continuous(labels = comma) + scale_x_continuous(breaks = seq(2009,2017, 1)) + scale_fill_manual(values=c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000'))
+```
+
+
+
+
+4) Як змінюється середня пожертва / кількість пожертв за категоріями?
+
+```{r}
+ggplot(data[data$year > 1970 & data$year < 2018,] %>% group_by(year, main_category) %>%  summarise(avg.per.backer = mean(avg.per.backer)), aes(x=year, y=avg.per.backer, fill=main_category)) + geom_area(size=.2, alpha=.4,colour="black", position = 'stack') + scale_y_continuous(labels = comma) + scale_x_continuous(breaks = seq(2009,2017, 1)) + scale_fill_manual(values=c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000'))
+```
+
+
+5) Середня кілкькість прихильників по категоріях
+
+```{r}
+ggplot(data[data$year > 1970 & data$year < 2018,] %>% group_by(year, main_category) %>%  summarise(backers = mean(backers)), aes(x=year, y=backers, fill=main_category)) + geom_area(size=.2, alpha=.4,colour="black", position = 'stack') + scale_y_continuous(labels = comma) + scale_x_continuous(breaks = seq(2009,2017, 1), minor_breaks = F) + scale_fill_manual(values=c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000'))
+```
+
+
+
+```{r}
+ggplot(data[data$year>1970,] %>% group_by(year, state)) + geom_bar(aes(x=year, fill=state), stat='count')
+
+ggplot(data[data$year > 1970,] %>% group_by(year, state) %>%  summarise(usd_pledged_real = sum(usd_pledged_real)), aes(x=year, y=usd_pledged_real, fill=state)) + geom_bar(stat='identity')
+```
+
