@@ -1,0 +1,193 @@
+---
+title: "Kickstarter data visualization"
+output: html_notebook
+---
+
+```{r}
+library(dplyr)
+library(ggplot2)
+require(scales)
+data <- read.csv("ks-projects-201801.csv", header = TRUE, stringsAsFactors = F)
+summary(data)
+
+data$ID <- NULL
+data$currency <- NULL
+data$category <- NULL
+data$usd.pledged <- NULL
+
+data$duration <- as.Date(data$deadline) - as.Date(data$launched)
+data$avg.per.backer <- data$usd_pledged_real/data$backers
+data$pledged.percent.from.goal <- round(data$usd_pledged_real / data$usd_goal_real,2)
+canceled.projects.after.pledging <- data[data$state=='canceled' & data$pledged.percent.from.goal > 1,]
+data$year <- as.integer(format(as.Date(data$launched),"%Y"))
+```
+
+
+```{r}
+(data %>% 
+  group_by(main_category) %>% 
+  summarise(usd_pledged_real = sum(usd_pledged_real)) %>% 
+  arrange( desc(usd_pledged_real))
+)$main_category
+```
+
+Everything is sorted according to sum of pledged resources from maximum categories to minimum.
+
+
+
+```{r}
+top.categories <- c("Games","Design","Technology","Film & Video", "Music")
+data$category <- data$main_category
+not.in.top.categoris <- !(data$category %in% top.categories)
+data$category[not.in.top.categoris] <- 'Other'
+data$category = factor(data$category, levels=c("Games","Design","Technology","Film & Video", "Music", "Other"))
+```
+
+```{r}
+data$state <- paste(toupper(substring(data$state, 1,1)), substring(data$state, 2), sep="")
+data$state <- factor(data$state, levels=c("Live","Successful","Failed","Canceled", "Suspended", "Undefined"))
+
+data$main_category <- factor(data$main_category, levels=c("Games","Design","Technology","Film & Video","Music","Publishing","Fashion","Food","Art","Comics","Theater","Photography","Crafts","Dance","Journalism"))
+```
+
+
+Тільки топ 5 категорії
+```{r fig.width=12}
+ggplot(data[data$year>1970 & data$year < 2018,] %>% group_by(year, category, state) %>% count()) + 
+  geom_bar(aes(x=year, y=n, fill=state), stat='identity') + 
+  facet_wrap( ~ category, ncol=3, scales="free_x") + 
+  scale_fill_manual(values = c("#F0E442", "#009E73", "#D55E00", "#E69F00", "#56B4E9", "#999999")) + 
+  scale_x_continuous(name='Year',breaks = seq(2009,2017, 2)) + 
+  scale_y_continuous(name='Number of projects',breaks = seq(0,35000, 5000), labels = comma) + 
+  theme_minimal() +
+  ggtitle("Top 5 categories of Kickstarter projects from 2009 to 2017") +
+  guides(fill=guide_legend(title="Project state")) +
+  theme(text=element_text(family="Ubuntu Mono"),
+        axis.text = element_text(colour = "#808080"),
+        strip.text = element_text(face = "bold", size = 10),
+        legend.title = element_text(face='bold'),
+        strip.background =element_rect(fill="#DCDCDC", linetype = NULL, size = 0),
+        axis.title = element_text(size = 14),
+        plot.title = element_text(size = 16,margin = margin(t=5, b = 15), hjust = -0.15),
+        axis.title.x = element_text(margin = margin(t = 15)),
+        axis.title.y = element_text(margin = margin(r = 12,l=5)),
+        panel.spacing = unit(2, "lines"))
+```
+
+```{r fig.width=12}
+
+ggplot(data[data$year>1970 & data$year < 2018,] %>% group_by(year, category, state) %>% count()) + 
+  geom_area(aes(x=year, y=n, fill=state), position="fill") + 
+  facet_wrap( ~ category, ncol=3, scales="free_x") + 
+  scale_fill_manual(values = c("#F0E442", "#009E73", "#D55E00", "#E69F00", "#56B4E9", "#999999")) + 
+  scale_x_continuous(name='Year',breaks = seq(2009,2017, 2), minor_breaks = F) + 
+  scale_y_continuous(name='Percent of projects',breaks = seq(0,1, 0.25), labels=c("0%", "25%", "50%", "75%", "100%"), minor_breaks = F) + 
+  theme_minimal() +
+  ggtitle("Kickstarter top 5 categories projects states proportion from 2009 to 2017") +
+  guides(fill=guide_legend(title="Project state")) +
+  theme(text=element_text(family="Ubuntu Mono"),
+        axis.text = element_text(colour = "#808080"),
+        strip.text = element_text(face = "bold", size = 10),
+        legend.title = element_text(face='bold'),
+        axis.title = element_text(size = 14),
+        plot.title = element_text(size = 16,margin = margin(t=5, b = 15), hjust = -0.2),
+        axis.title.x = element_text(margin = margin(t = 15)),
+        axis.title.y = element_text(margin = margin(r = 12,l=5)),
+        panel.spacing = unit(2, "lines"))
+```
+
+
+Усі категорії
+```{r fig.width=13}
+
+ggplot(data[data$year>1970 & data$year < 2018,] %>% group_by(year, main_category, state) %>% count()) + 
+  geom_bar(aes(x=year, y=n, fill=state), stat='identity') + 
+  facet_wrap( ~ main_category, ncol=5, scales="free_x") + 
+  scale_fill_manual(values = c("#F0E442", "#009E73", "#D55E00", "#E69F00", "#56B4E9", "#999999")) + 
+  scale_x_continuous(name='Year',breaks = seq(2009,2017, 2), minor_breaks = F) + 
+  scale_y_continuous(name='Number of projects',breaks = seq(0,35000, 2500), minor_breaks = F, labels = comma) + 
+  theme_minimal() +
+  ggtitle("Kickstarter projects from 2009 to 2017") +
+  guides(fill=guide_legend(title="Project state")) +
+  theme(text=element_text(family="Ubuntu Mono"),
+        axis.text = element_text(colour = "#808080"),
+        strip.text = element_text(face = "bold", size = 10),
+        legend.title = element_text(face='bold'),
+        axis.title = element_text(size = 14),
+        plot.title = element_text(size = 16,margin = margin(t=5, b = 15), hjust = -0.07),
+        axis.title.x = element_text(margin = margin(t = 15)),
+        axis.title.y = element_text(margin = margin(r = 12,l=5)),
+        panel.spacing = unit(2, "lines"))
+```
+
+```{r fig.width=13}
+
+ggplot(data[data$year>1970 & data$year < 2018,] %>% group_by(year, main_category, state) %>% count()) + 
+  geom_area(aes(x=year, y=n, fill=state), position="fill") + 
+  facet_wrap( ~ main_category, ncol=5, scales="free_x") + 
+  scale_fill_manual(values = c("#F0E442", "#009E73", "#D55E00", "#E69F00", "#56B4E9", "#999999")) + 
+  scale_x_continuous(name='Year',breaks = seq(2009,2017, 2), minor_breaks = F) + 
+  scale_y_continuous(name='Percent of projects',breaks = seq(0,1, 0.25), labels=c("0%", "25%", "50%", "75%", "100%"), minor_breaks = F) + 
+  theme_minimal() +
+  ggtitle("Kickstarter projects states proporion from 2009 to 2017") +
+  guides(fill=guide_legend(title="Project state")) +
+  theme(text=element_text(family="Ubuntu Mono"),
+        axis.text = element_text(colour = "#808080"),
+        strip.text = element_text(face = "bold", size = 10),
+        legend.title = element_text(face='bold'),
+        axis.title = element_text(size = 14),
+        plot.title = element_text(size = 16,margin = margin(t=5, b = 15), hjust = -0.06),
+        axis.title.x = element_text(margin = margin(t = 15)),
+        axis.title.y = element_text(margin = margin(r = 12,l=5)),
+        panel.spacing = unit(2, "lines"))
+```
+
+
+Загальна сума зборів у топ 5 категоріях впродовж 2009-2017 років.
+```{r fig.width=8}
+ggplot(data[data$year>1970 & data$year<2018,] %>% group_by(year, category) %>% summarise(usd_pledged_real = sum(usd_pledged_real))) + 
+  geom_area(aes(x=year, y=usd_pledged_real, fill=category)) +
+  scale_fill_manual(values = c("#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")) + 
+  scale_x_continuous(name='Year',breaks = seq(2009,2017, 1), minor_breaks = F) + 
+  scale_y_continuous(name='Collected funds', breaks=seq(0,700000000, 200000000), labels=c('0', '$200,000,000', "$400,000,000","$600,000,000"),
+                     minor_breaks = TRUE) + 
+  theme_minimal() +
+  ggtitle("Kickstarter projects states proporion from 2009 to 2017") +
+  guides(fill=guide_legend(title="Project state")) +
+  theme(text=element_text(family="Ubuntu Mono"),
+        axis.text = element_text(colour = "#808080"),
+        strip.text = element_text(face = "bold", size = 10),
+        legend.title = element_text(face='bold'),
+        axis.title = element_text(size = 14),
+        plot.title = element_text(size = 16,margin = margin(t=5, b = 15), hjust = 0.8),
+        axis.title.x = element_text(margin = margin(t = 15)),
+        axis.title.y = element_text(margin = margin(r = 12,l=5)),
+        panel.spacing = unit(2, "lines"))
+```
+
+
+
+Сумарне співвідношення кількості проектів в різних станах впродовж 2009-2017 років.
+```{r fig.width=7}
+ggplot(data[data$year>1970 & data$year<2018,] %>% group_by(year,state) %>% count()) + 
+  geom_area(aes(x=year, y=n, fill=state), position="fill") +
+  scale_fill_manual(values = c("#F0E442", "#009E73", "#D55E00", "#E69F00", "#56B4E9", "#999999")) + 
+  scale_x_continuous(name='Year',breaks = seq(2009,2017, 2), minor_breaks = F) + 
+  scale_y_continuous(name='Percent of projects',breaks = seq(0,1, 0.25), labels=c("0%", "25%", "50%", "75%", "100%"), minor_breaks = F) + 
+  theme_minimal() +
+  ggtitle("Kickstarter projects states proportion from 2009 to 2017") +
+  guides(fill=guide_legend(title="Project state")) +
+  theme(text=element_text(family="Ubuntu Mono"),
+        axis.text = element_text(colour = "#808080"),
+        strip.text = element_text(face = "bold", size = 10),
+        legend.title = element_text(face='bold'),
+        axis.title = element_text(size = 14),
+        plot.title = element_text(size = 16,margin = margin(t=5, b = 15), hjust = 0.3),
+        axis.title.x = element_text(margin = margin(t = 15)),
+        axis.title.y = element_text(margin = margin(r = 12,l=5)),
+        panel.spacing = unit(2, "lines"))
+```
+
+
+
+

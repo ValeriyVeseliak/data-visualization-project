@@ -1,0 +1,117 @@
+---
+title: "Kickstarter data visualization"
+output: html_notebook
+---
+
+Final draft visualizations 
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+require(scales)
+data <- read.csv("ks-projects-201801.csv", header = TRUE)
+summary(data)
+
+data$ID <- NULL
+data$currency <- NULL
+data$category <- NULL
+data$usd.pledged <- NULL
+
+data$duration <- as.Date(data$deadline) - as.Date(data$launched)
+data$avg.per.backer <- data$usd_pledged_real/data$backers
+data$pledged.percent.from.goal <- round(data$usd_pledged_real / data$usd_goal_real,2)
+canceled.projects.after.pledging <- data[data$state=='canceled' & data$pledged.percent.from.goal > 1,]
+data$year <- as.integer(format(as.Date(data$launched),"%Y"))
+```
+
+1)  розподіл за категоріями в часі (наприклад, за роками) - чи можна сказати, що якісь категорії стабільно домінують? Тут може бути використано stacked bar/area chart, stream graph.
+
+```{r}
+library(RColorBrewer)
+getPalette = colorRampPalette(brewer.pal(9, "Set1"))
+colorCount <- unique(data$main_category)
+ggplot(data[data$year > 1970 & data$year < 2018,] %>% group_by(year, main_category) %>%  summarise(usd_pledged_real = sum(usd_pledged_real)), aes(x=year, y=usd_pledged_real, fill=main_category)) + geom_area(size=.2, alpha=.4,colour="black", position = 'stack') + scale_y_continuous(labels = comma) + scale_x_continuous(breaks = seq(2009,2017, 1)) + scale_fill_manual(values=c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000'))
+```
+
+або
+
+```{r fig.width = 12, fig.height= 10}
+library(streamgraph)
+library(reshape2)
+
+data.for.streamgraph <- data[data$year > 1970 & data$year < 2018,] %>% group_by(year, main_category) %>%  summarise(usd_pledged_real = sum(usd_pledged_real))
+
+streamgraph( data.for.streamgraph, "main_category", "usd_pledged_real", "year", interactive=TRUE, interpolate = "step", offset="zero") %>%
+  sg_fill_tableau() %>%
+  sg_fill_brewer() %>%
+  sg_axis_y(10, tick_format = '$') %>%
+  sg_axis_x(tick_units = "year", tick_interval = 1, tick_format = "%Y") %>%
+  sg_legend(TRUE, "Category: ")
+```
+
+2) за категоріями і статусом - в якій категорії найбільше успішних проектів
+
+```{r}
+ggplot(data[data$year>1970 & data$state=='successful',] %>% group_by(year, main_category)) + geom_bar(aes(x=year, fill=main_category), stat='count') + scale_fill_manual(values=c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000'))
+```
+
+2б) за категоріями і статусом - в якій категорії найбільше failed проектів
+```{r}
+ggplot(data[data$year>1970 & data$state=='failed',] %>% group_by(year, main_category)) + geom_bar(aes(x=year, fill=main_category), stat='count') + scale_fill_manual(values=c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000'))
+```
+
+
+
+
+3) Як змінюється частка (відсоток) успішних проектів
+```{r}
+all.by.category <- data[data$year > 1970, ] %>% group_by(year, main_category) %>% count()
+successful.by.category <- data[data$year > 1970 & data$state=='successful',] %>% group_by(year, main_category) %>% count()
+all.by.category$n <- successful.by.category$n / all.by.category$n * 100
+
+
+ggplot(all.by.category[all.by.category$year<2018,], aes(x=year, y=n, fill=main_category)) + geom_area(size=.2, alpha=.4,colour="black", position = 'stack') + scale_y_continuous(labels = comma) + scale_x_continuous(breaks = seq(2009,2017, 1)) + scale_fill_manual(values=c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000'))
+```
+3б) Як змінюється частка (відсоток) успішних проектів
+```{r}
+all.by.category <- data[data$year > 1970, ] %>% group_by(year, main_category) %>% count()
+failed.by.category <- data[data$year > 1970 & data$state=='failed',] %>% group_by(year, main_category) %>% count()
+all.by.category$n <- failed.by.category$n / all.by.category$n * 100
+
+
+ggplot(all.by.category[all.by.category$year<2018,], aes(x=year, y=n, fill=main_category)) + geom_area(size=.2, alpha=.4,colour="black", position = 'stack') + scale_y_continuous(labels = comma) + scale_x_continuous(breaks = seq(2009,2017, 1)) + scale_fill_manual(values=c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000'))
+```
+
+
+
+
+4) Як змінюється середня пожертва / кількість пожертв за категоріями?
+
+```{r}
+ggplot(data[data$year > 1970 & data$year < 2018,] %>% group_by(year, main_category) %>%  summarise(avg.per.backer = mean(avg.per.backer)), aes(x=year, y=avg.per.backer, fill=main_category)) + geom_area(size=.2, alpha=.4,colour="black", position = 'stack') + scale_y_continuous(labels = comma) + scale_x_continuous(breaks = seq(2009,2017, 1)) + scale_fill_manual(values=c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000'))
+```
+
+
+5) Середня кілкькість прихильників по категоріях
+
+```{r}
+ggplot(data[data$year > 1970 & data$year < 2018,] %>% group_by(year, main_category) %>%  summarise(backers = mean(backers)), aes(x=year, y=backers, fill=main_category)) + geom_area(size=.2, alpha=.4,colour="black", position = 'stack') + scale_y_continuous(labels = comma) + scale_x_continuous(breaks = seq(2009,2017, 1), minor_breaks = F) + scale_fill_manual(values=c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000'))
+```
+
+
+
+Кількість і збори по станах проектів
+```{r}
+ggplot(data[data$year>1970,] %>% group_by(year, state)) + geom_bar(aes(x=year, fill=state), stat='count')
+
+ggplot(data[data$year > 1970,] %>% group_by(year, state) %>%  summarise(usd_pledged_real = sum(usd_pledged_real)), aes(x=year, y=usd_pledged_real, fill=state)) + geom_bar(stat='identity')
+```
+
+```{r fig.width=10}
+ggplot(data[data$year > 1970,]) + geom_point(aes(y=usd_goal_real, x=main_category))+ scale_y_continuous(labels = comma)
+```
+
+```{r fig.width=10}
+ggplot(data[data$year > 1970,]) + geom_point(aes(y=usd_pledged_real, x=main_category))+ scale_y_continuous(labels = comma)
+```
